@@ -14,7 +14,6 @@ typedef struct
 {
     half4 lighting [[color(0)]];
 } ColorData;
-
 kernel void my_resolve(imageblock<ColorData, imageblock_layout_implicit> imageBlock,
                        ushort2 tid [[thread_position_in_threadgroup]])
 {
