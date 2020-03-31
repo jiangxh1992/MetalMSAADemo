@@ -19,10 +19,10 @@
 
     id <MTLRenderPipelineState> _pipelineState;
     id <MTLRenderPipelineState> _myResolvePipelineState;
-    id <MTLDepthStencilState> _depthState;
     
     id<MTLBuffer> vertexBuffer;
     id<MTLTexture> msaaRT;
+    id<MTLTexture> resolveRT;
 }
 
 -(nonnull instancetype)initWithMetalKitView:(nonnull MTKView *)view;
@@ -52,6 +52,8 @@
     pipelineStateDescriptor.vertexFunction = vertexFunction;
     pipelineStateDescriptor.fragmentFunction = fragmentFunction;
     pipelineStateDescriptor.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+    pipelineStateDescriptor.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
+    pipelineStateDescriptor.stencilAttachmentPixelFormat = MTLPixelFormatInvalid;
 
     NSError *error = NULL;
     _pipelineState = [_device newRenderPipelineStateWithDescriptor:pipelineStateDescriptor error:&error];
@@ -70,15 +72,17 @@
     else
         texDesc.textureType = MTLTextureType2D;
     texDesc.sampleCount = SampleCount;
-    texDesc.usage |= MTLTextureUsageRenderTarget;
-    texDesc.storageMode = MTLStorageModeMemoryless;
-    texDesc.pixelFormat = MTLPixelFormatDepth32Float_Stencil8;
-    
     texDesc.pixelFormat = MTLPixelFormatBGRA8Unorm;
-    texDesc.usage |= MTLTextureUsageShaderWrite;
-    texDesc.storageMode = MTLStoreActionMultisampleResolve;
+    texDesc.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderWrite;
+    texDesc.storageMode = MTLStorageModeShared;
     msaaRT = [_device newTextureWithDescriptor:texDesc];
     msaaRT.label = @"msaaRT";
+        
+    texDesc.textureType = MTLTextureType2D;
+    texDesc.pixelFormat = MTLPixelFormatBGRA8Unorm;
+    texDesc.sampleCount = 1;
+    resolveRT = [_device newTextureWithDescriptor:texDesc];
+    resolveRT.label = @"resolveRT";
     
     // MSAA resolve
     {
@@ -93,16 +97,10 @@
         myResolvePipelineDescriptor.threadgroupSizeMatchesTileSize = YES;
         myResolvePipelineDescriptor.tileFunction = customResolveKernel;
         _myResolvePipelineState = [_device newRenderPipelineStateWithTileDescriptor:myResolvePipelineDescriptor
-                                                                                   options:0 reflection:nil error:&error];
+                                                                                   options:0  reflection:nil error:&error];
         
         NSAssert(_myResolvePipelineState, @"Failed to create pipeline state: %@", error);
     }
-/*
-    MTLDepthStencilDescriptor *depthStateDesc = [[MTLDepthStencilDescriptor alloc] init];
-    depthStateDesc.depthCompareFunction = MTLCompareFunctionLess;
-    depthStateDesc.depthWriteEnabled = YES;
-    _depthState = [_device newDepthStencilStateWithDescriptor:depthStateDesc];
-*/
     _commandQueue = [_device newCommandQueue];
 }
 
@@ -125,8 +123,10 @@
     // Opaque Forward Pass
     MTLRenderPassDescriptor* renderPassDescriptor = [[MTLRenderPassDescriptor alloc] init];
     renderPassDescriptor.colorAttachments[0].texture = msaaRT;
+    renderPassDescriptor.colorAttachments[0].resolveTexture = resolveRT;
     renderPassDescriptor.colorAttachments[0].loadAction = MTLLoadActionClear;
-    renderPassDescriptor.colorAttachments[0].storeAction = MTLStoreActionDontCare;
+    renderPassDescriptor.colorAttachments[0].storeAction = MTLStoreActionMultisampleResolve;
+    
     renderPassDescriptor.tileWidth = 16;
     renderPassDescriptor.tileHeight = 16;
     if(renderPassDescriptor != nil)
@@ -149,6 +149,7 @@
             [renderEncoder dispatchThreadsPerTile:MTLSizeMake(16, 16, 1)];
             [renderEncoder popDebugGroup];
         }
+        
         [renderEncoder endEncoding];
     }
     

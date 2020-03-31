@@ -25,6 +25,7 @@ kernel void my_resolve(imageblock<ColorData, imageblock_layout_implicit> imageBl
       result.lighting += ibData.lighting * popcount(colorMask);
   }
   result.lighting /= 4;
+    
   ushort output_sample_mask = 0xF;
   imageBlock.write(result, tid, output_sample_mask); // Write one value to all samples
 }
